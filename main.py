@@ -1,86 +1,56 @@
-import logging
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
-import requests
+import os
+import aiohttp
+from pyrogram import Client, filters
+from pyrogram.types import InputMediaPhoto
 
-# Configuration
-TELEGRAM_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"
-SENATOR_API_URL = "https://api.fast-creat.ir/photo-quality"
-SENATOR_API_KEY = "7046488481:0Gpl8EFRJqZjywo@Api_ManagerRoBot"
+# Bot configuration
+API_ID = "15787995"  # Replace with your Telegram API ID
+API_HASH = "e51a3154d2e0c45e5ed70251d68382de"  # Replace with your Telegram API Hash
+BOT_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"  # Replace with your Bot Token
+ENHANCE_API_KEY = "7046488481:0Gpl8EFRJqZjywo@Api_ManagerRoBot"
 
-# Set up logging
-logging.basicConfig(
-    filename="bot.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+app = Client("photo_enhancer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle incoming photos."""
-    chat_id = update.message.chat_id
-    logger.info(f"Received photo from chat {chat_id}")
+async def enhance_photo(photo_url):
+    api_url = f"https://api.fast-creat.ir/photo-quality?apikey={ENHANCE_API_KEY}&url={photo_url}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(api_url) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data.get("ok") and data.get("status") == "successfully":
+                    return data["result"]["link"]
+            return None
 
-    # Check for photo
-    if not update.message.photo:
-        await update.message.reply_text("Please send a photo!")
-        logger.info(f"No photo in message from chat {chat_id}")
-        return
+@app.on_message(filters.command(["start"]))
+async def start(client, message):
+    await message.reply_text("Send me a photo, and I'll enhance it for you!")
 
-    # Get highest resolution photo
-    photo = update.message.photo[-1]
+@app.on_message(filters.photo)
+async def handle_photo(client, message):
     try:
-        # Get file URL
-        file = await photo.get_file()
-        photo_url = file.file_path
-        logger.info(f"Photo URL: {photo_url}")
-
-        # Call Senator API
-        params = {"apikey": SENATOR_API_KEY, "url": photo_url}
-        response = requests.get(SENATOR_API_URL, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        logger.info(f"Senator API response: {data}")
-
-        # Check response
-        if not data.get("ok") or data.get("status") != "successfully" or not data.get("result", {}).get("link"):
-            logger.error(f"Invalid API response: {data}")
-            await update.message.reply_text("Failed to enhance photo. Try again or contact @SenatorAPI.")
-            return
-
-        enhanced_url = data["result"]["link"]
-        logger.info(f"Enhanced URL: {enhanced_url}")
-
-        # Send enhanced photo
-        await context.bot.send_photo(
-            chat_id=chat_id,
-            photo=enhanced_url,
-            caption="Enhanced photo!"
-        )
-        logger.info(f"Sent enhanced photo to chat {chat_id}")
-
-    except requests.RequestException as e:
-        logger.error(f"Senator API error: {str(e)}")
-        await update.message.reply_text("Photo enhancement failed. Try again or contact @SenatorAPI.")
+        # Get the photo file
+        photo = message.photo
+        file_id = photo.file_id
+        
+        # Get the file path from Telegram
+        file = await client.get_file(file_id)
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+        
+        # Send processing message
+        processing_msg = await message.reply_text("Enhancing your photo... Please wait.")
+        
+        # Enhance the photo using the API
+        enhanced_url = await enhance_photo(file_url)
+        
+        if enhanced_url:
+            # Send the enhanced photo
+            await message.reply_media_group([InputMediaPhoto(enhanced_url)])
+            await processing_msg.edit_text("Photo enhanced successfully!")
+        else:
+            await processing_msg.edit_text("Failed to enhance the photo. Please try again.")
+            
     except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        await update.message.reply_text("An error occurred. Try again.")
-
-def main() -> None:
-    """Run the bot."""
-    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == "your_telegram_bot_token_here":
-        logger.error("TELEGRAM_TOKEN not set")
-        raise ValueError("Set TELEGRAM_TOKEN in bot.py")
-
-    # Create application
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Add photo handler
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-    # Start bot
-    logger.info("Bot started")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+        await message.reply_text(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    app.run()
