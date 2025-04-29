@@ -4,9 +4,9 @@ from pyrogram import Client, filters
 from pyrogram.types import InputMediaPhoto
 
 # Bot configuration
-API_ID = "15787995"  # Replace with your Telegram API ID
-API_HASH = "e51a3154d2e0c45e5ed70251d68382de"  # Replace with your Telegram API Hash
-BOT_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"  # Replace with your Bot Token
+API_ID = "15787995"
+API_HASH = "e51a3154d2e0c45e5ed70251d68382de"
+BOT_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"
 ENHANCE_API_KEY = "7046488481:0Gpl8EFRJqZjywo@Api_ManagerRoBot"
 
 app = Client("photo_enhancer_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -32,12 +32,17 @@ async def handle_photo(client, message):
         photo = message.photo
         file_id = photo.file_id
         
-        # Get the file path from Telegram
-        file = await client.get_file(file_id)
-        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+        # Download the photo locally
+        processing_msg = await message.reply_text("Downloading and enhancing your photo... Please wait.")
+        file_path = await client.download_media(message=message, in_memory=False)
         
-        # Send processing message
-        processing_msg = await message.reply_text("Enhancing your photo... Please wait.")
+        # Since the API requires a URL, you need to upload the file or use a publicly accessible URL
+        # If the API accepts Telegram file URLs, you can try constructing one (not always reliable)
+        # For now, let's assume the API needs a local file or a hosted URL
+        # If the API requires a URL, you may need to upload the file somewhere (e.g., a temporary hosting service)
+        
+        # For simplicity, let's assume the API can handle a Telegram file URL
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
         
         # Enhance the photo using the API
         enhanced_url = await enhance_photo(file_url)
@@ -48,6 +53,10 @@ async def handle_photo(client, message):
             await processing_msg.edit_text("Photo enhanced successfully!")
         else:
             await processing_msg.edit_text("Failed to enhance the photo. Please try again.")
+            
+        # Clean up the downloaded file
+        if os.path.exists(file_path):
+            os.remove(file_path)
             
     except Exception as e:
         await message.reply_text(f"An error occurred: {str(e)}")
