@@ -2,46 +2,50 @@ import os
 import requests
 from pyrogram import Client, filters
 from pyrogram.types import Message
-import tempfile
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 # Bot configuration
-API_ID = "15787995"  # Replace with your Telegram API ID
-API_HASH = "e51a3154d2e0c45e5ed70251d68382de"  # Replace with your Telegram API Hash
-BOT_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"  # Replace with your Telegram Bot Token
+API_ID = 15787995
+API_HASH = "e51a3154d2e0c45e5ed70251d68382de"
+BOT_TOKEN = "7612286812:AAHvaGvI3BUmgTpSdI5fWWt_p7jtnb3O2Rw"
 ENHANCE_API_URL = "https://api.fast-creat.ir/photo-quality"
 API_KEY = "7046488481:0Gpl8EFRJqZjywo@Api_ManagerRoBot"
-CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 
 # Initialize Pyrogram client
 app = Client("PhotoEnhanceBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Helper function to upload photo to catbox.moe
-async def upload_to_catbox(file_path):
+# Helper function to get Telegram file URL
+async def get_telegram_file_url(client: Client, file_id: str) -> str:
     try:
-        with open(file_path, "rb") as f:
-            files = {"fileToUpload": f}
-            data = {"reqtype": "fileupload"}
-            response = requests.post(CATBOX_UPLOAD_URL, data=data, files=files)
-            if response.status_code == 200 and response.text.startswith("https://"):
-                return response.text.strip()
-            else:
-                return None
+        file = await client.get_file(file_id)
+        file_path = file.file_path
+        # Telegram file URLs are temporary and accessible via the bot
+        file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+        logger.info(f"Generated Telegram file URL: {file_url}")
+        return file_url
     except Exception as e:
-        print(f"Upload error: {e}")
+        logger.error(f"Failed to get Telegram file URL: {e}")
         return None
 
 # Helper function to call the photo enhancement API
-def enhance_photo(photo_url):
+def enhance_photo(photo_url: str) -> str:
     try:
         params = {"apikey": API_KEY, "url": photo_url}
-        response = requests.get(ENHANCE_API_URL, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("ok") and data.get("status") == "successfully":
-                return data["result"]["link"]
+        logger.info(f"Sending API request with URL: {photo_url}")
+        response = requests.get(ENHANCE_API_URL, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        logger.info(f"API response: {data}")
+        if data.get("ok") and data.get("status") == "successfully" and data.get("result", {}).get("link"):
+            return data["result"]["link"]
+        logger.error(f"API response invalid: {data}")
         return None
-    except Exception as e:
-        print(f"API error: {e}")
+    except requests.RequestException as e:
+        logger.error(f"API request failed: {e}")
         return None
 
 # Start command handler
@@ -59,39 +63,32 @@ async def handle_photo(client: Client, message: Message):
         # Send a processing message
         status_msg = await message.reply_text("Processing your photo...")
 
-        # Download the photo
+        # Get the photo file ID
         photo = message.photo
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
-            file_path = temp_file.name
-            await photo.download(file_path)
+        file_id = photo.file_id
 
-        # Upload photo to catbox.moe to get a public URL
-        photo_url = await upload_to_catbox(file_path)
+        # Get the Telegram file URL
+        photo_url = await get_telegram_file_url(client, file_id)
         if not photo_url:
-            await status_msg.edit_text("Failed to upload the photo. Please try again.")
-            os.remove(file_path)
+            await status_msg.edit_text("Failed to access the photo. Please try again.")
             return
 
         # Call the enhancement API
         enhanced_url = enhance_photo(photo_url)
         if not enhanced_url:
-            await status_msg.edit_text("Failed to enhance the photo. The API may be down or the photo is invalid.")
-            os.remove(file_path)
+            await status_msg.edit_text(
+                "Failed to enhance the photo. The API may be down or the photo is invalid. Please try again."
+            )
             return
 
         # Send the enhanced photo URL to the user
         await status_msg.edit_text(f"Here’s your enhanced photo:\n{enhanced_url}")
 
-        # Clean up the temporary file
-        os.remove(file_path)
-
     except Exception as e:
-        await status_msg.edit_text("An error occurred. Please try again later.")
-        print(f"Error: {e}")
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        logger.error(f"Unexpected error: {e}")
+        await message.reply_text("An error occurred. Please try again later.")
 
 # Run the bot
 if __name__ == "__main__":
-    print("Bot is running...")
+    logger.info("Starting PhotoEnhanceBot...")
     app.run()
